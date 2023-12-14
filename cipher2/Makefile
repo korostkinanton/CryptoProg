@@ -1,20 +1,22 @@
-CXX = g++
-CXXFLAGS = -Wall -std=c++14
-LDFLAGS = -lcryptopp
+.PHONY: all debug release clean
 
-SOURCES = main.cpp
-OBJECTS = $(SOURCES:.cpp=.o)
-EXECUTABLE = file_crypt
+RELEASE_FLAGS = -O2 -Wall -DNDEBUG
+DEBUG_FLAGS   = -g -O0 -Wall
+RELEASE_EXEC  = task1
+DEBUG_EXEC    = main-dbg
+SOURCE        = main.cpp
 
-all: $(EXECUTABLE)
+all: debug release
 
-$(EXECUTABLE): $(OBJECTS)
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) $^ -o $@
+debug: $(DEBUG_EXEC)
 
-%.o: %.cpp
-	$(CXX) $(CXXFLAGS) -c $<
+$(DEBUG_EXEC): main.cpp
+	g++ $(DEBUG_FLAGS) main.cpp -o $(DEBUG_EXEC) -lcryptopp
 
-.PHONY: clean
+release: $(RELEASE_EXEC)
+
+$(RELEASE_EXEC): main.cpp
+	g++ $(RELEASE_FLAGS) main.cpp -o $(RELEASE_EXEC) -lcryptopp
 
 clean:
-	rm -f $(OBJECTS) $(EXECUTABLE)
+	rm -f $(RELEASE_EXEC) $(DEBUG_EXEC)

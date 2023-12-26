@@ -1,81 +1,89 @@
 #include <iostream>
 #include <fstream>
+#include <cryptopp/cryptlib.h>
+#include <cryptopp/hex.h>
+#include <cryptopp/filters.h>
 #include <cryptopp/aes.h>
 #include <cryptopp/ccm.h>
-#include <cryptopp/filters.h>
-#include <cryptopp/files.h>
-#include <cryptopp/modes.h>
-#include <cryptopp/secblock.h>
-#include <cryptopp/cryptlib.h>
 #include <cryptopp/osrng.h>
-#include <cryptopp/hex.h>
-#include <cryptopp/md5.h>
+#include <cryptopp/files.h>
 
 using namespace CryptoPP;
+using namespace std;
 
-void DeriveKey(const std::string& password, SecByteBlock& derivedKey, SecByteBlock& iv) {
-    const int KEY_SIZE = AES::DEFAULT_KEYLENGTH;
-    const int IV_SIZE = AES::BLOCKSIZE;
+void EncryptFile(const string& inputFileName, const string& outputFileName, const string& password) {
+    AutoSeededRandomPool rnd;
+    SecByteBlock key(AES::MAX_KEYLENGTH), iv(AES::BLOCKSIZE);  // Создание блочных массивов для хранения ключа и IV
+    rnd.GenerateBlock(key, key.size());
+    rnd.GenerateBlock(iv, iv.size());
 
-    MD5 hash; //Создается объект MD5, который будет использоваться для вычисления хеша пароля.
-    SecByteBlock digest(hash.DigestSize()); //Создается блок для хранения хеша пароля (digest)
-    hash.Update((const byte*)password.data(), password.size());
-    hash.Final(digest);
-    //Пароль обновляется в объекте MD5.
+    string encoded;
+    StringSource(key, key.size(), true, new HexEncoder(new StringSink(encoded))); // Преобразование ключа в строку в шестнадцатеричном формате
+    ofstream keyFile("key.txt");
+    keyFile << encoded; //Запись
+    keyFile.close();
 
-    std::memcpy(derivedKey, digest, KEY_SIZE);
-    std::memcpy(iv, digest + KEY_SIZE, IV_SIZE);
-    //Полученный хеш пароля используется для заполнения ключа и IV с помощью функции memcpy.
+    string encodedIV;
+    StringSource(iv, iv.size(), true, new HexEncoder(new StringSink(encodedIV)));
+    ofstream IVFile("iv.txt");
+    IVFile << encodedIV;
+    IVFile.close();
+
+    CBC_Mode<AES>::Encryption encryption(key, key.size(), iv); // Создание объекта для шифрования в режиме CBC с использованием ключа и IV
+    FileSource(inputFileName.c_str(), true, // Чтение входного файла
+        new StreamTransformationFilter(encryption,  // Применение шифрования
+            new FileSink(outputFileName.c_str()) // Запись результатов в выходной файл
+        )
+    );
 }
 
-void EncryptFile(const std::string& inputFile, const std::string& outputFile, const std::string& password) {
-    SecByteBlock key(AES::DEFAULT_KEYLENGTH);
-    SecByteBlock iv(AES::BLOCKSIZE);
-	// Создаются объекты key и iv типа SecByteBlock для хранения ключа и вектора инициализации.
-    DeriveKey(password, key, iv); //Функция DeriveKey вызывается для генерации ключа и вектора инициализации на основе пароля.
+void DecryptFile(const string& inputFileName, const string& outputFileName, const string& password) {
+    string encoded, encodedIV; // Переменные для хранения закодированного ключа и IV
+    ifstream keyFile("key.txt");
+    getline(keyFile, encoded); //Чтение
+    keyFile.close();
+    
+    ifstream IVFile("iv.txt");
+    getline(IVFile, encodedIV);
+    IVFile.close();
 
-    CBC_Mode<AES>::Encryption encryption; //Создается объект CBC_Mode<AES>::Encryption encryption для представления шифрования в режиме CBC.
-    encryption.SetKeyWithIV(key, key.size(), iv); //Устанавливаются ключ и вектор инициализации для объекта encryption с помощью метода SetKeyWithIV
+    SecByteBlock key(AES::MAX_KEYLENGTH), iv(AES::BLOCKSIZE);
+    StringSource(encoded, true, new HexDecoder(new ArraySink(key, key.size()))); // Декодирование ключа из строки в шестнадцатеричном формате
+    StringSource(encodedIV, true, new HexDecoder(new ArraySink(iv, iv.size()))); // Декодирование IV из строки в шестнадцатеричном формате
 
-    FileSource fs(inputFile.c_str(), true, new StreamTransformationFilter(encryption, new FileSink(outputFile.c_str()))); //Создается объект FileSource для чтения исходного файла и объект FileSink для записи зашифрованных данных. Запускается процесс шифрования с использованием объекта encryption и созданных объектов FileSource и FileSink
-}
-
-void DecryptFile(const std::string& inputFile, const std::string& outputFile, const std::string& password) {
-    SecByteBlock key(AES::DEFAULT_KEYLENGTH);
-    SecByteBlock iv(AES::BLOCKSIZE);
-
-    DeriveKey(password, key, iv);
-
-    CBC_Mode<AES>::Decryption decryption; //Создается объект CBC_Mode<AES>::Decryption decryption для представления расшифрования в режиме CBC.
-    decryption.SetKeyWithIV(key, key.size(), iv); //Устанавливаются ключ и вектор инициализации для объекта decryption с помощью метода SetKeyWithIV
-
-    FileSource fs(inputFile.c_str(), true, new StreamTransformationFilter(decryption, new FileSink(outputFile.c_str()))); //Запускается процесс расшифрования с использованием объекта decryption и созданных объектов FileSource и FileSink
+    CBC_Mode<AES>::Decryption decryption(key, key.size(), iv); // Создание объекта для расшифровки в режиме CBC с использованием ключа и IV
+    FileSource(inputFileName.c_str(), true,//Читаем
+        new StreamTransformationFilter(decryption,//Принимаем расшифровку
+            new FileSink(outputFileName.c_str())//Записываем
+        )
+    );
 }
 
 int main() {
-    int choice;
-    std::string inputFile, outputFile, password;
+    string mode, inputFileName, outputFileName, password;
+    cout << "Выберите действие (1 - шифрование, 2 - расшифровка): ";
+    cin >> mode;
 
-    std::cout << "1 - зашифровка, 2 - расшировка ";
-    std::cin >> choice;
+    if (mode != "1" && mode != "2") {
+        cerr << "Выбрано недопустимое действие!" << endl;
+        return 1;
+    }
 
-    std::cout << "Введите имя входного файла ";
-    std::cin >> inputFile;
+    cout << "Введите имя входного файла: ";
+    cin >> inputFileName;
 
-    std::cout << "Введите имя выходного файла ";
-    std::cin >> outputFile;
+    cout << "Введите имя выходного файла: ";
+    cin >> outputFileName;
 
-    std::cout << "Введите пароль ";
-    std::cin >> password;
+    cout << "Введите пароль: ";
+    cin >> password;
 
-    if (choice == 1) {
-        EncryptFile(inputFile, outputFile, password);
-        std::cout << "Файл зашифрован" << std::endl;
-    } else if (choice == 2) {
-        DecryptFile(inputFile, outputFile, password);
-        std::cout << "Файл расшифрован" << std::endl;
+    if (mode == "1") {
+        EncryptFile(inputFileName, outputFileName, password);
+        cout << "Файл зашифрован." << endl;
     } else {
-        std::cout << "Некоректный режим работы" << std::endl;
+        DecryptFile(inputFileName, outputFileName, password);
+        cout << "Файл расшифрован." << endl;
     }
 
     return 0;
